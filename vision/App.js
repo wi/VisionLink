@@ -1,15 +1,42 @@
 import React, { useState } from 'react';
 import { Button, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Camera, useCameraPermission, useCameraDevice } from 'react-native-vision-camera';
+
+import {
+  Camera,
+  useCameraDevice,
+  useFrameProcessor,
+  useCameraPermission,
+} from "react-native-vision-camera";
+import { useImageLabeler } from "react-native-vision-camera-v3-image-labeling";
+import { runOnJS } from 'react-native-reanimated';
+
 
 export default function App() {
-  const [facing, setFacing] = useState('back');
   const { hasPermission, requestPermission } = useCameraPermission();
 
   const device = useCameraDevice("back");
   
+  const options = {minConfidence : 0.5}
+  const {scanImage} = useImageLabeler(options)
+  /* 
+  const frameProcessor = useFrameProcessor((frame) => {
+    'worklet'
+    console.log('frame...')
+    //const data = scanImage(frame)
+	  //console.log(data, 'data')
+  }, [])
+  */
+
+  const frameProcessor = useFrameProcessor((frame) => {
+    'worklet'
+    const x = scanImage(frame)
+    console.log(`${x})`)
+  }, [])
+  
 
   const [messages, setMessages] = useState(["test", "test2"]);
+
+  console.log("dsadsa")
 
   if (!hasPermission) {
     return (
@@ -27,7 +54,12 @@ export default function App() {
   return (
     <View style={styles.container}>
       <View style={styles.halfScreen}>
-        <Camera style={styles.camera} device={device} isActive={true}>
+        <Camera 
+                  style={StyleSheet.absoluteFill}
+                  device={device}
+                  isActive={true}
+                  frameProcessor={frameProcessor}
+        >
           <View style={styles.buttonContainer}>
             <TouchableOpacity style={styles.button} onPress={toggleCameraFacing}>
               <Text style={styles.text}>Flip Camera</Text>
