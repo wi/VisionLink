@@ -1,49 +1,56 @@
-import React, { useState } from 'react';
-import { Button, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Camera, useCameraPermission, useCameraDevice } from 'react-native-vision-camera';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, View, ActivityIndicator } from 'react-native';
+import { useSharedValue } from 'react-native-reanimated';
+import {
+  Camera,
+  useCameraDevices,
+  useFrameProcessor,
+} from 'react-native-vision-camera';
+import { labelImage } from 'vision-camera-image-labeler';
+
+import { Label } from './components/Label';
 
 export default function App() {
-  const [facing, setFacing] = useState('back');
-  const { hasPermission, requestPermission } = useCameraPermission();
+  const [hasPermission, setHasPermission] = useState(false);
+  const currentLabel = useSharedValue('');
 
-  const device = useCameraDevice("back");
-  
+  const devices = useCameraDevices();
+  const device = devices.back;
 
-  const [messages, setMessages] = useState(["test", "test2"]);
+  useEffect(() => {
+    (async () => {
+      const status = await Camera.requestCameraPermission();
+      setHasPermission(status === 'authorized');
+    })();
+  }, []);
 
-  if (!hasPermission) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.message}>We need your permission to show the camera</Text>
-        <Button onPress={requestPermission} title="Grant Permission" />
-      </View>
-    );
-  }
+  const frameProcessor = useFrameProcessor(
+    (frame) => {
+      'worklet';
+      const labels = labelImage(frame);
 
-  function toggleCameraFacing() {
-    setFacing(current => (current === 'back' ? 'front' : 'back'));
-  }
+      console.log('Labels:', labels);
+      currentLabel.value = labels[0]?.label;
+    },
+    [currentLabel]
+  );
 
   return (
     <View style={styles.container}>
-      <View style={styles.halfScreen}>
-        <Camera style={styles.camera} device={device} isActive={true}>
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity style={styles.button} onPress={toggleCameraFacing}>
-              <Text style={styles.text}>Flip Camera</Text>
-            </TouchableOpacity>
-          </View>
-        </Camera>
-      </View>
-
-      <View style={styles.halfScreen}>
-        <Text style={styles.message}>Camera is ready!</Text>
-        {messages?.map((message, index) => (
-          <Text key={index} style={{marginLeft: 10}}>{message}</Text>
-        ))}
-
-        <Button onPress={e => console.log("click")} title='lol' style={styles.debugButton} />
-      </View>
+      {device != null && hasPermission ? (
+        <>
+          <Camera
+            style={styles.camera}
+            device={device}
+            isActive={true}
+            frameProcessor={frameProcessor}
+            frameProcessorFps={3}
+          />
+          <Label sharedValue={currentLabel} />
+        </>
+      ) : (
+        <ActivityIndicator size="large" color="white" />
+      )}
     </View>
   );
 }
@@ -51,36 +58,12 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  halfScreen: {
-    flex: 1,
-  },
-  message: {
-    textAlign: 'center',
-    paddingBottom: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'black',
   },
   camera: {
     flex: 1,
+    width: '100%',
   },
-  buttonContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: 'transparent',
-    margin: 64,
-  },
-  button: {
-    flex: 1,
-    alignSelf: 'flex-end',
-    alignItems: 'center',
-  },
-  text: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  debugButton: {
-    position: 'absolute',
-    bottom: 0,
-    right: 20,
-  }
 });
