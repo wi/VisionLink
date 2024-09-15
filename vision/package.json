@@ -9,12 +9,16 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@react-native-voice/voice": "^3.2.4",
     "expo": "~51.0.28",
     "expo-camera": "~15.0.16",
+    "expo-constants": "^16.0.2",
     "expo-status-bar": "~1.12.1",
     "openai": "^4.61.0",
     "react": "18.2.0",
     "react-native": "0.74.5",
+    "react-native-google-places-autocomplete": "^2.5.6",
+    "react-native-maps-directions": "^1.9.0",
     "react-native-reanimated": "^3.15.2",
     "react-native-usb-serialport-for-android": "^0.5.0",
     "react-native-vision-camera": "^4.5.3",
