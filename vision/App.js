@@ -11,10 +11,10 @@ import {
 import { useImageLabeler } from 'react-native-vision-camera-v3-image-labeling';
 import { useSharedValue, Worklets } from 'react-native-worklets-core';
 import Voice from '@react-native-voice/voice';
-
+import * as Haptics from 'expo-haptics';
 import { GOOGLE_API_KEY } from './env';
-
 import * as Location from 'expo-location';
+import * as Speech from 'expo-speech';
 
 function getWalkingDirections(originCoords, placeName) {
   return new Promise((resolve, reject) => {
@@ -51,6 +51,7 @@ function fetchWalkingDirections(originCoords, destinationCoords) {
     const origin = `${originCoords.lat},${originCoords.long}`;
     const destination = `${destinationCoords.lat},${destinationCoords.long}`;
     const mode = 'walking';
+
 
     const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=${mode}&key=${GOOGLE_API_KEY}`;
     console.log('Directions API URL:', url);
@@ -148,6 +149,17 @@ export default function App() {
         console.error('Error getting destination coordinates:', error);
       });
   }, [recognizedText]);
+
+  useEffect(() => {
+    if (directions.length > 0) {
+      const step = directions[0];
+      if (step) {
+        // remove all HTML tags from the step instructions
+        step.html_instructions = step.html_instructions.replace(/<[^>]*>/g, '');
+        speak(step.html_instructions);
+      }
+    }
+  }, [directions])
   
   const onSpeechResults = event => {
     setRecognizedText(event.value[0]);
@@ -255,13 +267,52 @@ export default function App() {
     // Update messages with sorted labels and their confidence percentages
     setMessages(
       labelsWithConfidence.map(
-        (item) => `${item.label}: ${(item.confidence * 100).toFixed(2)}%`
+        //(item) => `${item.label}: ${(item.confidence * 100).toFixed(2)}%`
+        (item) => `${item.label}`
       )
     );
+
+    // Haptic feedback
+    const highestConfidence = labelsWithConfidence[0].confidence;
+    //hapticFeedback(highestConfidence);
   
     // Update previousLabels
     setPreviousLabels(combinedFrames.slice(0, 100));
   });    
+
+  const hapticFeedback = (confidence) => {
+    if (confidence < 0.6) {
+      return;
+    }
+    if (confidence < 0.9) {
+      triggerLight();
+    } else if (confidence < 1.6) {
+      triggerMed();
+    } else {
+      triggerHeavy();
+    }
+  }
+
+  const triggerLight = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }
+
+  const triggerMed = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Med);
+    setTimeout(async() => {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Med);
+    }, 1000);
+  }
+
+  const triggerHeavy = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Med);
+    setTimeout(async() => {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Med);
+    }, 1000);
+    setTimeout(async() => {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Med);
+    }, 2000);
+  }
     
   const frameProcessor = useFrameProcessor((frame) => {
     'worklet';
@@ -287,6 +338,10 @@ export default function App() {
     setFacing(current => (current === 'back' ? 'front' : 'back'));
   }
 
+  const speak = (text) => {
+    Speech.speak(text);
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.halfScreen}>
@@ -305,11 +360,10 @@ export default function App() {
       </View>
       <View style={styles.halfScreen}>
         <Text style={styles.message}>Detected labels:</Text>
-        {messages?.map((message, index) => (
-          <Text key={index} style={{marginLeft: 10}} >{message}</Text>
+        {messages?.slice(0, 5).map((message, index) => (
+          <Text key={index} style={{marginLeft: 10, fontSize:20}} >{message}</Text>
         ))}
 
-        <Button onPress={e => console.log(labels.value)} title='lol' style={styles.debugButton} />
       </View>
       <ScrollView style={styles.container} ScrollView>
         <SafeAreaView />
@@ -337,7 +391,7 @@ export default function App() {
         </View>
         {directions.length > 0 && directions.map((step, index) => {
             return (
-              <Text key={index} style={{marginLeft: 10}} >{step.html_instructions}</Text>
+              <Text key={index} style={{marginLeft: 10}} >{step.html_instructions.replace(/<[^>]*>/g, '')}</Text>
             )
           })}
       </ScrollView>
