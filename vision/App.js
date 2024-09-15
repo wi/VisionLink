@@ -1,26 +1,28 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Button, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import {
   Camera,
   useCameraDevice,
   useFrameProcessor,
   useCameraPermission,
+  getCameraDevice,
 } from 'react-native-vision-camera';
 import { useImageLabeler } from 'react-native-vision-camera-v3-image-labeling';
-import { useSharedValue, Worklets } from 'react-native-worklets-core'
-
+import { useSharedValue, Worklets } from 'react-native-worklets-core';
 
 
 export default function App() {
   const { hasPermission, requestPermission } = useCameraPermission();
-  const [facing, setFacing] = useState('back');
   const [messages, setMessages] = useState([]);
   const labels = useSharedValue([]);
 
   const [previousLabels, setPreviousLabels] = useState([]);
   
-
-  const device = useCameraDevice('external');
+  const devices = Camera.getAvailableCameraDevices();
+  let device = getCameraDevice(devices, 'back');
+  let usbCamera = devices.find((d) => d.position === "external");
+  
+  //const device = useCameraDevice('external');
   
   const options = {minConfidence : 0.5}
   const {scanImage} = useImageLabeler(options)
@@ -33,6 +35,28 @@ export default function App() {
   }, [])
   */
 
+  const mapLabel = (label) => {
+    const labels = {
+      "shirt": "Person",
+      "standing": "Person",
+      "clothing": "Person",
+      "fun": "Person",
+      "jacket": "Person",
+      "jeans": "Person",
+      "sitting": "Person",
+
+      "metal": "Hazard",
+      "desk": "Hazard",
+      "chair": "Hazard",
+
+      "bumper": "Vehicle",
+      "vehicle": "Vehicle",
+      "car": "Vehicle",
+      
+    };
+    return labels[label.toLowerCase()] || label;
+  }
+
   const updateLabels = Worklets.createRunOnJS((frame) => {
     let netAmount = {};
   
@@ -43,10 +67,11 @@ export default function App() {
     combinedFrames.forEach((labelsArray) => {
       labelsArray.forEach((labelObj) => {
         const { label, confidence } = labelObj;
-        if (!netAmount[label]) {
-          netAmount[label] = 0;
+        const realLabel = mapLabel(label);
+        if (!netAmount[realLabel]) {
+          netAmount[realLabel] = 0;
         }
-        netAmount[label] += confidence;
+        netAmount[realLabel] += confidence;
       });
     });
   
@@ -68,7 +93,7 @@ export default function App() {
   
     // Update previousLabels
     setPreviousLabels(combinedFrames.slice(0, 100));
-  });
+  });    
     
   const frameProcessor = useFrameProcessor((frame) => {
     'worklet';
@@ -76,8 +101,6 @@ export default function App() {
   
     // Extract label names to pass to the JS thread
     labels.value = labels.map((label) => label.label);
-
-    //console.log(labels.value)
 
     updateLabels({labels: labels})
   
@@ -101,7 +124,7 @@ export default function App() {
       <View style={styles.halfScreen}>
         <Camera 
                   style={StyleSheet.absoluteFill}
-                  device={device}
+                  device={usbCamera ?? device}
                   isActive={true}
                   frameProcessor={frameProcessor}
                   frameProcessorFps={0}
