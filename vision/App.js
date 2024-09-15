@@ -6,10 +6,71 @@ import {
   useFrameProcessor,
   useCameraPermission,
   getCameraDevice,
+  runAtTargetFps,
 } from 'react-native-vision-camera';
 import { useImageLabeler } from 'react-native-vision-camera-v3-image-labeling';
 import { useSharedValue, Worklets } from 'react-native-worklets-core';
 import Voice from '@react-native-voice/voice';
+
+import { GOOGLE_API_KEY } from './env';
+
+import * as Location from 'expo-location';
+
+function getWalkingDirections(originCoords, placeName) {
+  return new Promise((resolve, reject) => {
+    const location = `${originCoords.lat},${originCoords.long}`;
+    const radius = 5000; // Radius in meters (adjust as needed)
+    const keyword = encodeURIComponent(placeName);
+
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location}&radius=${radius}&keyword=${keyword}&key=${GOOGLE_API_KEY}`;
+    console.log('url', url);
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'OK' && data.results.length > 0) {
+                const place = data.results[0];
+                console.log('place', place);
+                const destinationCoords = {
+                    lat: place.geometry.location.lat,
+                    long: place.geometry.location.lng
+                };
+                resolve(destinationCoords);
+            } else {
+                reject('No places found or Places API error: ' + data.status);
+            }
+        })
+        .catch(error => {
+            reject('Error fetching data: ' + error);
+        });
+});
+}
+
+function fetchWalkingDirections(originCoords, destinationCoords) {
+  return new Promise((resolve, reject) => {
+    const origin = `${originCoords.lat},${originCoords.long}`;
+    const destination = `${destinationCoords.lat},${destinationCoords.long}`;
+    const mode = 'walking';
+
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=${mode}&key=${GOOGLE_API_KEY}`;
+    console.log('Directions API URL:', url);
+
+    fetch(url)
+      .then(response => response.json())
+      .then(data => {
+        console.log('Directions API Response:', data);
+        if (data.status === 'OK' && data.routes.length > 0) {
+          const steps = data.routes[0].legs[0].steps;
+          resolve(steps);
+        } else {
+          reject('No routes found or Directions API error: ' + data.status);
+        }
+      })
+      .catch(error => {
+        reject('Error fetching directions: ' + error);
+      });
+  });
+}
 
 
 export default function App() {
@@ -18,6 +79,9 @@ export default function App() {
   const labels = useSharedValue([]);
   const [isListening, setIsListening] = useState(false);
   const [recognizedText, setRecognizedText] = useState('');
+  const [location, setLocation] = useState(null);
+  const [directions, setDirections] = useState([]);
+
 
   useEffect(() => {
     Voice.onSpeechResults = onSpeechResults;
@@ -33,13 +97,58 @@ export default function App() {
         console.log('getService', getService);
       }
     }
-    androidPremissionChecking();
+
+    const requestLocationPermission = async () => {
+      if (Platform.OS === 'android') {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          console.log('Permission to access location was denied');
+          return;
+        }
+        let location = await Location.getCurrentPositionAsync({});
+        setLocation(location);
+      }
+    };
+
+    androidPremissionChecking().then(() => {
+      requestLocationPermission();
+    });
+
+
 
     return () => {
       Voice.destroy().then(Voice.removeAllListeners);
     };
   }, []);
 
+
+  useEffect(() => {
+    if (!recognizedText.toLowerCase().startsWith("take me to")) return;
+    if (!location) return; // Ensure location is available
+  
+    const destinationName = recognizedText.slice(11).trim();
+  
+    const originCoords = {
+      lat: location.coords.latitude,
+      long: location.coords.longitude
+    };
+  
+    getWalkingDirections(originCoords, destinationName)
+      .then(destinationCoords => {
+        // Now fetch the walking directions
+        fetchWalkingDirections(originCoords, destinationCoords)
+          .then(steps => {
+            setDirections(steps);
+          })
+          .catch(error => {
+            console.error('Error fetching walking directions:', error);
+          });
+      })
+      .catch(error => {
+        console.error('Error getting destination coordinates:', error);
+      });
+  }, [recognizedText]);
+  
   const onSpeechResults = event => {
     setRecognizedText(event.value[0]);
   }
@@ -156,12 +265,12 @@ export default function App() {
     
   const frameProcessor = useFrameProcessor((frame) => {
     'worklet';
-    const labels = scanImage(frame);
-  
-    // Extract label names to pass to the JS thread
-    labels.value = labels.map((label) => label.label);
 
-    updateLabels({labels: labels})
+    runAtTargetFps(5, () => {
+      const labels = scanImage(frame);
+    
+      updateLabels({labels: labels})
+    });
   
   }, [labels]);
 
@@ -186,7 +295,6 @@ export default function App() {
                   device={usbCamera ?? device}
                   isActive={true}
                   frameProcessor={frameProcessor}
-                  frameProcessorFps={0}
         >
           <View style={styles.buttonContainer}>
             <TouchableOpacity style={styles.button} onPress={toggleCameraFacing}>
@@ -195,9 +303,7 @@ export default function App() {
           </View>
         </Camera>
       </View>
-
       <View style={styles.halfScreen}>
-        <Text style={styles.message}>Camera is ready!</Text>
         <Text style={styles.message}>Detected labels:</Text>
         {messages?.map((message, index) => (
           <Text key={index} style={{marginLeft: 10}} >{message}</Text>
@@ -205,34 +311,36 @@ export default function App() {
 
         <Button onPress={e => console.log(labels.value)} title='lol' style={styles.debugButton} />
       </View>
-    <View style={styles.container}>
-      <SafeAreaView />
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Type your message..."
-          value={recognizedText}
-          onChangeText={text => setRecognizedText(text)}
-        />
-        <TouchableOpacity
-          onPress={() => (isListening ? stopListening() : startListening())}
-          style={styles.voiceButton}>
-          {isListening ? (
-            <Text style={styles.voiceButtonText}>•••</Text>
-          ) : (
-            <Image
-              source={{
-                uri: 'https://cdn-icons-png.flaticon.com/512/4980/4980251.png',
-              }}
-              style={{width: 45, height: 45}}
-            />
-          )}
-        </TouchableOpacity>
-        <TouchableOpacity onPress={sendMessage} style={styles.sendButton}>
-          <Text style={styles.sendButtonText}>Send</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+      <ScrollView style={styles.container} ScrollView>
+        <SafeAreaView />
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.input}
+            placeholder="Type your message..."
+            value={recognizedText}
+            onChangeText={text => setRecognizedText(text)}
+          />
+          <TouchableOpacity
+            onPress={() => (isListening ? stopListening() : startListening())}
+            style={styles.voiceButton}>
+            {isListening ? (
+              <Text style={styles.voiceButtonText}>•••</Text>
+            ) : (
+              <Image
+                source={{
+                  uri: 'https://cdn-icons-png.flaticon.com/512/4980/4980251.png',
+                }}
+                style={{width: 45, height: 45}}
+              />
+            )}
+          </TouchableOpacity>
+        </View>
+        {directions.length > 0 && directions.map((step, index) => {
+            return (
+              <Text key={index} style={{marginLeft: 10}} >{step.html_instructions}</Text>
+            )
+          })}
+      </ScrollView>
     </View>
   );
 }
