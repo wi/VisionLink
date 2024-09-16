@@ -19,7 +19,7 @@ import * as Speech from 'expo-speech';
 function getWalkingDirections(originCoords, placeName) {
   return new Promise((resolve, reject) => {
     const location = `${originCoords.lat},${originCoords.long}`;
-    const radius = 5000; // Radius in meters (adjust as needed)
+    const radius = 5000;
     const keyword = encodeURIComponent(placeName);
 
     const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location}&radius=${radius}&keyword=${keyword}&key=${GOOGLE_API_KEY}`;
@@ -82,8 +82,18 @@ export default function App() {
   const [recognizedText, setRecognizedText] = useState('');
   const [location, setLocation] = useState(null);
   const [directions, setDirections] = useState([]);
+  const [previousLabels, setPreviousLabels] = useState([]);
 
+  const options = {minConfidence : 0.5}
+  const {scanImage} = useImageLabeler(options)
 
+  const HAPTIC_COOLDOWN = 1000
+  let lastHapticTime = 0;
+
+  const devices = Camera.getAvailableCameraDevices();
+  let device = getCameraDevice(devices, 'back');
+  let usbCamera = devices.find((d) => d.position === "external");
+  
   useEffect(() => {
     Voice.onSpeechResults = onSpeechResults;
     Voice.onSpeechError = error => console.log('onSpeechError', error);
@@ -125,7 +135,7 @@ export default function App() {
 
   useEffect(() => {
     if (!recognizedText.toLowerCase().startsWith("take me to")) return;
-    if (!location) return; // Ensure location is available
+    if (!location) return;
   
     const destinationName = recognizedText.slice(11).trim();
   
@@ -136,7 +146,6 @@ export default function App() {
   
     getWalkingDirections(originCoords, destinationName)
       .then(destinationCoords => {
-        // Now fetch the walking directions
         fetchWalkingDirections(originCoords, destinationCoords)
           .then(steps => {
             setDirections(steps);
@@ -154,7 +163,6 @@ export default function App() {
     if (directions.length > 0) {
       const step = directions[0];
       if (step) {
-        // remove all HTML tags from the step instructions
         step.html_instructions = step.html_instructions.replace(/<[^>]*>/g, '');
         speak(step.html_instructions);
       }
@@ -186,34 +194,7 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
-  }
-
-  const sendMessage = () => {
-    if (recognizedText) {
-      setMessages([...messages, {text: recognizedText, sender: 'user'}]);
-      setRecognizedText('');
-    }
-  };
-  
-
-  const [previousLabels, setPreviousLabels] = useState([]);
-  
-  const devices = Camera.getAvailableCameraDevices();
-  let device = getCameraDevice(devices, 'back');
-  let usbCamera = devices.find((d) => d.position === "external");
-  
-  //const device = useCameraDevice('external');
-  
-  const options = {minConfidence : 0.5}
-  const {scanImage} = useImageLabeler(options)
-  /* 
-  const frameProcessor = useFrameProcessor((frame) => {
-    'worklet'
-    console.log('frame...')
-    //const data = scanImage(frame)
-	  //console.log(data, 'data')
-  }, [])
-  */
+  } 
 
   const mapLabel = (label) => {
     const labels = {
@@ -240,10 +221,8 @@ export default function App() {
   const updateLabels = Worklets.createRunOnJS((frame) => {
     let netAmount = {};
   
-    // Combine current labels with previous labels
     const combinedFrames = [frame.labels, ...previousLabels];
   
-    // Accumulate confidence scores
     combinedFrames.forEach((labelsArray) => {
       labelsArray.forEach((labelObj) => {
         const { label, confidence } = labelObj;
@@ -255,16 +234,13 @@ export default function App() {
       });
     });
   
-    // Convert netAmount object into an array of { label, confidence }
     const labelsWithConfidence = Object.keys(netAmount).map((label) => ({
       label,
       confidence: netAmount[label],
     }));
   
-    // Sort the array by confidence in descending order
     labelsWithConfidence.sort((a, b) => b.confidence - a.confidence);
   
-    // Update messages with sorted labels and their confidence percentages
     setMessages(
       labelsWithConfidence.map(
         //(item) => `${item.label}: ${(item.confidence * 100).toFixed(2)}%`
@@ -272,15 +248,19 @@ export default function App() {
       )
     );
 
-    // Haptic feedback
     const highestConfidence = labelsWithConfidence[0].confidence;
-    //hapticFeedback(highestConfidence);
+    hapticFeedback(highestConfidence);
   
-    // Update previousLabels
     setPreviousLabels(combinedFrames.slice(0, 100));
   });    
 
   const hapticFeedback = (confidence) => {
+    const now = Date.now();
+    
+    if (now - lastHapticTime < HAPTIC_COOLDOWN) {
+      return;
+    }
+  
     if (confidence < 0.6) {
       return;
     }
@@ -291,8 +271,10 @@ export default function App() {
     } else {
       triggerHeavy();
     }
-  }
-
+  
+    lastHapticTime = now;
+  };
+  
   const triggerLight = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }
@@ -359,9 +341,9 @@ export default function App() {
         </Camera>
       </View>
       <View style={styles.halfScreen}>
-        <Text style={styles.message}>Detected labels:</Text>
+        <Text style={{...styles.message, fontSize: 20}}>Detected Labels</Text>
         {messages?.slice(0, 5).map((message, index) => (
-          <Text key={index} style={{marginLeft: 10, fontSize:20}} >{message}</Text>
+          <Text key={index} style={{marginLeft: 10, fontSize:30}} >{message}</Text>
         ))}
 
       </View>
